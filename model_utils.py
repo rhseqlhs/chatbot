@@ -16,15 +16,15 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
     # Do not calculate loss when target is padding
     # Otherwise, we discourage model from saying more than target length
     use_cuda = encoder.is_cuda()
-    encoder_hidden = encoder.init_hidden(batch_size)
+    hidden = encoder.init_hidden(batch_size)
     decoder_hidden = decoder.init_hidden(batch_size)
     # Create dropout masks
     if encoder.rnn_type == 'GRU':
-        e_dropout_probs = torch.zeros(encoder_hidden.size()).fill_(e_dropout)
-        e_zero_tensor = torch.zeros(encoder_hidden.size())
+        e_dropout_probs = torch.zeros(hidden.size()).fill_(e_dropout)
+        e_zero_tensor = torch.zeros(hidden.size())
     else:
-        e_dropout_probs = torch.zeros(encoder_hidden[0].size()).fill_(e_dropout)
-        e_zero_tensor = torch.zeros(encoder_hidden[0].size())
+        e_dropout_probs = torch.zeros(hidden[0].size()).fill_(e_dropout)
+        e_zero_tensor = torch.zeros(hidden[0].size())
     if decoder.rnn_type == 'GRU':
         d_dropout_probs = torch.zeros(decoder_hidden.size()).fill_(d_dropout)
         d_zero_tensor = torch.zeros(decoder_hidden.size())
@@ -38,7 +38,7 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
     d_scale = 1 / (1 - d_dropout)
 
     # Container for encoder outputs
-    encoder_output = Variable(torch.zeros(batch_size, dataset.max_len,
+    output = Variable(torch.zeros(batch_size, dataset.max_len,
                                           encoder.hidden_size), requires_grad=False)
 
     # Create new instance of DataLoader to simulate sampling with
@@ -58,23 +58,23 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
         lines, target = lines.cuda(), target.cuda()
         e_mask, d_mask = e_mask.cuda(), d_mask.cuda()
         e_zero_tensor, d_zero_tensor = e_zero_tensor.cuda(), d_zero_tensor.cuda()
-        encoder_output = encoder_output.cuda()
+        output = output.cuda()
 
     # clear hidden state
-    encoder_hidden = repackage_hidden(encoder_hidden)
+    hidden = repackage_hidden(hidden)
     decoder_hidden = repackage_hidden(decoder_hidden)
 
     optimizer.zero_grad()  # clear gradients
 
     for i in range(xlens[0]):
-        encoder_output[:, i], encoder_hidden = encoder(lines[:, i], hidden)
+        output[:, i], hidden = encoder(lines[:, i], hidden)
         # Varational Dropout (dropout with same mask at each time step)
         if encoder.rnn_type == 'GRU':
-            encoder_hidden.data = torch.addcmul(e_zero_tensor, e_scale,
-                                                e_mask, encoder_hidden.data)
+            hidden.data = torch.addcmul(e_zero_tensor, e_scale,
+                                                e_mask, hidden.data)
         elif encoder.rnn_type == 'LSTM':
-            encoder_hidden[0].data = torch.addcmul(e_zero_tensor, e_scale,
-                                                   e_mask, encoder_hidden[0].data)
+            hidden[0].data = torch.addcmul(e_zero_tensor, e_scale,
+                                                   e_mask, hidden[0].data)
 
     # Grab final hidden state of encoder
     if encoder.rnn_type == 'GRU':
