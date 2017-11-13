@@ -10,16 +10,36 @@ from dataset import collate_fn
 from data_utils import process_sentence, sentence_to_index
 
 
-def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset, p_tf, choices, loss):
-    # turn on model training mode
-    encoder.train()
-    decoder.train()
+def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
+          choices, loss, e_dropout, d_dropout):
     batch_loss = 0
     # Do not calculate loss when target is padding
     # Otherwise, we discourage model from saying more than target length
     use_cuda = encoder.is_cuda()
     encoder_hidden = encoder.init_hidden(batch_size)
     decoder_hidden = decoder.init_hidden(batch_size)
+    # Create dropout masks
+    if encoder.rnn_type == 'GRU':
+        e_dropout_probs = torch.zeros(encoder_hidden.size()).fill_(e_dropout)
+        e_zero_tensor = torch.zeros(encoder_hidden.size())
+    else:
+        e_dropout_probs = torch.zeros(encoder_hidden[0].size()).fill_(e_dropout)
+        e_zero_tensor = torch.zeros(encoder_hidden[0].size())
+    if decoder.rnn_type == 'GRU':
+        d_dropout_probs = torch.zeros(decoder_hidden.size()).fill_(d_dropout)
+        d_zero_tensor = torch.zeros(decoder_hidden.size())
+    else:
+        d_dropout_probs = torch.zeros(decoder_hidden[0].size()).fill_(d_dropout)
+        d_zero_tensor = torch.zeros(decoder_hidden[0].size())
+
+    e_mask = torch.bernoulli(e_dropout_probs)
+    d_mask = torch.bernoulli(d_dropout_probs)
+    e_scale = 1 / (1 - e_dropout)
+    d_scale = 1 / (1 - d_dropout)
+
+    # Container for encoder outputs
+    encoder_output = Variable(torch.zeros(batch_size, dataset.max_len,
+                                          encoder.hidden_size), requires_grad=False)
 
     # Create new instance of DataLoader to simulate sampling with
     # replacement (PyTorch SubsetRandomSampler does not).
@@ -36,13 +56,25 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset, p_t
     target = Variable(target.long(), requires_grad=False)
     if use_cuda:
         lines, target = lines.cuda(), target.cuda()
+        e_mask, d_mask = e_mask.cuda(), d_mask.cuda()
+        e_zero_tensor, d_zero_tensor = e_zero_tensor.cuda(), d_zero_tensor.cuda()
+        encoder_output = encoder_output.cuda()
+
     # clear hidden state
     encoder_hidden = repackage_hidden(encoder_hidden)
     decoder_hidden = repackage_hidden(decoder_hidden)
 
     optimizer.zero_grad()  # clear gradients
 
-    output, hidden = encoder(lines, encoder_hidden, xlens, dataset.max_len)
+    for i in range(xlens[0]):
+        encoder_output[:, i], encoder_hidden = encoder(lines[:, i], hidden)
+        # Varational Dropout (dropout with same mask at each time step)
+        if encoder.rnn_type == 'GRU':
+            encoder_hidden.data = torch.addcmul(e_zero_tensor, e_scale,
+                                                e_mask, encoder_hidden.data)
+        elif encoder.rnn_type == 'LSTM':
+            encoder_hidden[0].data = torch.addcmul(e_zero_tensor, e_scale,
+                                                   e_mask, encoder_hidden[0].data)
 
     # Grab final hidden state of encoder
     if encoder.rnn_type == 'GRU':
@@ -66,10 +98,18 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset, p_t
         _, idx = torch.max(decoder_output, 1)
 
         # batched per token teacher forcing
-        if p_tf > 0.0001 and choices[i] <= p_tf:
+        if choices[i] == 1:
             decoder_output = target[:, i]
         else:
             decoder_output = idx  # set current prediction as decoder input
+
+        # Varational Dropout (dropout with same mask at each time step)
+        if decoder.rnn_type == 'GRU':
+            decoder_hidden.data = torch.addcmul(d_zero_tensor, d_scale,
+                                                d_mask, decoder_hidden.data)
+        elif decoder.rnn_type == 'LSTM':
+            decoder_hidden[0].data = torch.addcmul(d_zero_tensor, d_scale,
+                                                   d_mask, decoder_hidden[0].data)
 
     batch_loss.backward()
     # clip gradients to 0.5 (hyper-parameter!) to reduce exploding gradients
@@ -81,9 +121,6 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset, p_t
 
 
 def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
-    # turn on model evaluation mode
-    encoder.eval()
-    decoder.eval()
     total_loss = 0
     use_cuda = encoder.is_cuda()
     encoder_hidden = encoder.init_hidden(batch_size)
@@ -135,9 +172,6 @@ def respond(encoder, decoder, input_line, dataset):
     # turn off cuda
     encoder.cpu()
     decoder.cpu()
-    # turn on model evaluation mode
-    encoder.eval()
-    decoder.eval()
 
     encoder_hidden = encoder.init_hidden(1)
     decoder_hidden = decoder.init_hidden(1)
