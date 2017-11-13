@@ -30,7 +30,9 @@ class ChatDataset(Dataset):
             special_tokens (list of str): other tokens to add to vocabulary
             pre_trained (Vector): pre trained word embeddings
         """
-        special_tokens.extend([pad_token, unk_token, sos_token, eos_token])
+        special_tokens = [pad_token, unk_token, sos_token, eos_token] + special_tokens
+        # the value 0 will be regarded as padding
+        assert special_tokens[0] == pad_token
         inputs, targets, counter, xlen = process_data(data_path, max_length,
                                                       eos_token, pad_token)
         self.vocab = vocab.Vocab(counter=counter, max_size=max_vocab_size,
@@ -51,8 +53,8 @@ class ChatDataset(Dataset):
         self.unk_token = unk_token
         self.embed_dim = embed_dim
         self.special_tokens = special_tokens
-        self.x_data = torch.IntTensor(len(inputs), max_length).fill_(self.pad_idx)
-        self.y_data = torch.IntTensor(len(targets), max_length).fill_(self.pad_idx)
+        self.x_data = torch.zeros(len(inputs), max_length).int()
+        self.y_data = torch.zeros(len(targets), max_length).int()
         self.x_lens = xlen
 
         convert_to_index(inputs, self.vocab, unk_token, self.eos_idx, self.x_data)
