@@ -11,21 +11,24 @@ from data_utils import process_sentence, sentence_to_index
 
 
 def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
-          choices, loss, drop_t):
+          choices, loss, drop_t, drop_e):
     batch_loss = 0
     use_cuda = encoder.is_cuda()
     hidden = encoder.init_hidden(batch_size)
     decoder_hidden = decoder.init_hidden(batch_size)
     # Create dropout masks
+    word_drop_probs = torch.zeros(dataset.nwords).fill_(1 - drop_e)
     if encoder.rnn_type == 'GRU':
-        dropout_probs = torch.zeros(hidden.size()).fill_(drop_t)
+        dropout_probs = torch.zeros(hidden.size()).fill_(1 - drop_t)
     else:
-        dropout_probs = torch.zeros(hidden[0].size()).fill_(drop_t)
+        dropout_probs = torch.zeros(hidden[0].size()).fill_(1 - drop_t)
 
+    word_mask = torch.bernoulli(word_drop_probs).long()
     drop_mask = torch.bernoulli(dropout_probs)
     drop_scale = 1 / (1 - drop_t)
 
-    # Container for encoder outputs
+    # Container for encoder inputs, outputs
+    input = Variable(torch.zeros(dataset.nwords), requires_grad=False)
     output = Variable(torch.zeros(batch_size, dataset.max_len,
                                           encoder.hidden_size), requires_grad=False)
 
@@ -44,8 +47,8 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
     target = Variable(target.long(), requires_grad=False)
     if use_cuda:
         lines, target = lines.cuda(), target.cuda()
-        drop_mask = drop_mask.cuda()
-        output = output.cuda()
+        word_mask, drop_mask = word_mask.cuda(), drop_mask.cuda()
+        input, output = input.cuda(), output.cuda()
 
     # clear hidden state
     hidden = repackage_hidden(hidden)
@@ -54,7 +57,10 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
     optimizer.zero_grad()  # clear gradients
 
     for i in range(xlens[0]):
-        output[:, i], hidden = encoder(lines[:, i], hidden)
+        # word dropout: drop the same word randomly
+        input.data = torch.mul(word_mask, lines[:, i].data)
+
+        output[:, i], hidden = encoder(input, hidden)
         # Varational Dropout (dropout with same mask at each time step)
         if encoder.rnn_type == 'GRU':
             hidden.data = torch.mul(drop_mask, hidden.data) * drop_scale
