@@ -11,31 +11,21 @@ from data_utils import process_sentence, sentence_to_index
 
 
 def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
-          choices, loss, e_dropout, d_dropout):
+          choices, loss, drop_t):
     batch_loss = 0
-    # Do not calculate loss when target is padding
-    # Otherwise, we discourage model from saying more than target length
     use_cuda = encoder.is_cuda()
     hidden = encoder.init_hidden(batch_size)
     decoder_hidden = decoder.init_hidden(batch_size)
     # Create dropout masks
     if encoder.rnn_type == 'GRU':
-        e_dropout_probs = torch.zeros(hidden.size()).fill_(e_dropout)
-        e_zero_tensor = torch.zeros(hidden.size())
+        dropout_probs = torch.zeros(hidden.size()).fill_(drop_t)
+        zero_tensor = torch.zeros(hidden.size())
     else:
-        e_dropout_probs = torch.zeros(hidden[0].size()).fill_(e_dropout)
-        e_zero_tensor = torch.zeros(hidden[0].size())
-    if decoder.rnn_type == 'GRU':
-        d_dropout_probs = torch.zeros(decoder_hidden.size()).fill_(d_dropout)
-        d_zero_tensor = torch.zeros(decoder_hidden.size())
-    else:
-        d_dropout_probs = torch.zeros(decoder_hidden[0].size()).fill_(d_dropout)
-        d_zero_tensor = torch.zeros(decoder_hidden[0].size())
+        dropout_probs = torch.zeros(hidden[0].size()).fill_(drop_t)
+        zero_tensor = torch.zeros(hidden[0].size())
 
-    e_mask = torch.bernoulli(e_dropout_probs)
-    d_mask = torch.bernoulli(d_dropout_probs)
-    e_scale = 1 / (1 - e_dropout)
-    d_scale = 1 / (1 - d_dropout)
+    drop_mask = torch.bernoulli(dropout_probs)
+    drop_scale = 1 / (1 - drop_t)
 
     # Container for encoder outputs
     output = Variable(torch.zeros(batch_size, dataset.max_len,
@@ -56,8 +46,7 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
     target = Variable(target.long(), requires_grad=False)
     if use_cuda:
         lines, target = lines.cuda(), target.cuda()
-        e_mask, d_mask = e_mask.cuda(), d_mask.cuda()
-        e_zero_tensor, d_zero_tensor = e_zero_tensor.cuda(), d_zero_tensor.cuda()
+        drop_mask, zero_tensor = drop_mask.cuda(), zero_tensor.cuda()
         output = output.cuda()
 
     # clear hidden state
@@ -70,11 +59,11 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
         output[:, i], hidden = encoder(lines[:, i], hidden)
         # Varational Dropout (dropout with same mask at each time step)
         if encoder.rnn_type == 'GRU':
-            hidden.data = torch.addcmul(e_zero_tensor, e_scale,
-                                                e_mask, hidden.data)
+            hidden.data = torch.addcmul(zero_tensor, drop_scale,
+                                                drop_mask, hidden.data)
         elif encoder.rnn_type == 'LSTM':
-            hidden[0].data = torch.addcmul(e_zero_tensor, e_scale,
-                                                   e_mask, hidden[0].data)
+            hidden[0].data = torch.addcmul(zero_tensor, drop_scale,
+                                                   drop_mask, hidden[0].data)
 
     # Grab final hidden state of encoder
     if encoder.rnn_type == 'GRU':
@@ -105,11 +94,11 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
 
         # Varational Dropout (dropout with same mask at each time step)
         if decoder.rnn_type == 'GRU':
-            decoder_hidden.data = torch.addcmul(d_zero_tensor, d_scale,
-                                                d_mask, decoder_hidden.data)
+            decoder_hidden.data = torch.addcmul(zero_tensor, drop_scale,
+                                                drop_mask, decoder_hidden.data)
         elif decoder.rnn_type == 'LSTM':
-            decoder_hidden[0].data = torch.addcmul(d_zero_tensor, d_scale,
-                                                   d_mask, decoder_hidden[0].data)
+            decoder_hidden[0].data = torch.addcmul(zero_tensor, drop_scale,
+                                                   drop_mask, decoder_hidden[0].data)
 
     batch_loss.backward()
     # clip gradients to 0.5 (hyper-parameter!) to reduce exploding gradients
