@@ -19,10 +19,8 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
     # Create dropout masks
     if encoder.rnn_type == 'GRU':
         dropout_probs = torch.zeros(hidden.size()).fill_(drop_t)
-        zero_tensor = torch.zeros(hidden.size())
     else:
         dropout_probs = torch.zeros(hidden[0].size()).fill_(drop_t)
-        zero_tensor = torch.zeros(hidden[0].size())
 
     drop_mask = torch.bernoulli(dropout_probs)
     drop_scale = 1 / (1 - drop_t)
@@ -46,7 +44,7 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
     target = Variable(target.long(), requires_grad=False)
     if use_cuda:
         lines, target = lines.cuda(), target.cuda()
-        drop_mask, zero_tensor = drop_mask.cuda(), zero_tensor.cuda()
+        drop_mask = drop_mask.cuda()
         output = output.cuda()
 
     # clear hidden state
@@ -59,11 +57,9 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
         output[:, i], hidden = encoder(lines[:, i], hidden)
         # Varational Dropout (dropout with same mask at each time step)
         if encoder.rnn_type == 'GRU':
-            hidden.data = torch.addcmul(zero_tensor, drop_scale,
-                                                drop_mask, hidden.data)
+            hidden.data = torch.mul(drop_mask, hidden.data) * drop_scale
         elif encoder.rnn_type == 'LSTM':
-            hidden[0].data = torch.addcmul(zero_tensor, drop_scale,
-                                                   drop_mask, hidden[0].data)
+            hidden[0].data = torch.mul(drop_mask, hidden[0].data) * drop_scale
 
     # Grab final hidden state of encoder
     if encoder.rnn_type == 'GRU':
@@ -94,11 +90,9 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
 
         # Varational Dropout (dropout with same mask at each time step)
         if decoder.rnn_type == 'GRU':
-            decoder_hidden.data = torch.addcmul(zero_tensor, drop_scale,
-                                                drop_mask, decoder_hidden.data)
+            decoder_hidden.data = torch.mul(drop_mask, decoder_hidden.data) * drop_scale
         elif decoder.rnn_type == 'LSTM':
-            decoder_hidden[0].data = torch.addcmul(zero_tensor, drop_scale,
-                                                   drop_mask, decoder_hidden[0].data)
+            decoder_hidden[0].data = torch.mul(drop_mask, decoder_hidden[0].data) * drop_scale
 
     batch_loss.backward()
     # clip gradients to 0.5 (hyper-parameter!) to reduce exploding gradients
