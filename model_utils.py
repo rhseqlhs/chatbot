@@ -11,13 +11,13 @@ from data_utils import process_sentence, sentence_to_index
 
 
 def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
-          choices, loss, drop_t, drop_e):
+          choices, loss, drop_t, drop_w):
     batch_loss = 0
     use_cuda = encoder.is_cuda()
     hidden = encoder.init_hidden(batch_size)
     decoder_hidden = decoder.init_hidden(batch_size)
     # Create dropout masks
-    word_drop_probs = torch.zeros(dataset.nwords).fill_(1 - drop_e)
+    word_drop_probs = torch.zeros(dataset.nwords).fill_(1 - drop_w)
     if encoder.rnn_type == 'GRU':
         dropout_probs = torch.zeros(hidden.size()).fill_(1 - drop_t)
     else:
