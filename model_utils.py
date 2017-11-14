@@ -24,13 +24,14 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
         dropout_probs = torch.zeros(hidden[0].size()).fill_(1 - drop_t)
 
     word_mask = torch.bernoulli(word_drop_probs).long()
+    masked_indexes = torch.zeros(batch_size).long()
     drop_mask = torch.bernoulli(dropout_probs)
     drop_scale = 1 / (1 - drop_t)
 
     # Container for encoder inputs, outputs
     input = Variable(torch.zeros(dataset.nwords), requires_grad=False)
     output = Variable(torch.zeros(batch_size, dataset.max_len,
-                                          encoder.hidden_size), requires_grad=False)
+                                  encoder.hidden_size), requires_grad=False)
 
     # Create new instance of DataLoader to simulate sampling with
     # replacement (PyTorch SubsetRandomSampler does not).
@@ -49,6 +50,7 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
         lines, target = lines.cuda(), target.cuda()
         word_mask, drop_mask = word_mask.cuda(), drop_mask.cuda()
         input, output = input.cuda(), output.cuda()
+        masked_indexes = masked_indexes.cuda()
 
     # clear hidden state
     hidden = repackage_hidden(hidden)
@@ -58,7 +60,8 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
 
     for i in range(xlens[0]):
         # word dropout: drop the same word randomly
-        input.data = torch.mul(word_mask, lines[:, i].data)
+        masked_indexes = word_mask.index(lines[:, i].data)
+        input.data = torch.mul(masked_indexes, lines[:, i].data)
 
         output[:, i], hidden = encoder(input, hidden)
         # Varational Dropout (dropout with same mask at each time step)
@@ -67,6 +70,9 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
         elif encoder.rnn_type == 'LSTM':
             hidden[0].data = torch.mul(drop_mask, hidden[0].data) * drop_scale
 
+    # reshape drop_mask for use in decoder
+    drop_mask = torch.cat(drop_mask, 1).view(encoder.nlayers, batch_size,
+                                             encoder.hidden_size)
     # Grab final hidden state of encoder
     if encoder.rnn_type == 'GRU':
         hidden.data = torch.cat(hidden, 1).view(encoder.nlayers, batch_size,
@@ -75,6 +81,7 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
         hidden[0].data = torch.cat(hidden[0], 1).view(encoder.nlayers, batch_size,
                                                       encoder.hidden_size).data
         hidden = hidden[0]
+
     # Set to decoder's initial hidden state
     if decoder.rnn_type == 'GRU':
         decoder_hidden = hidden
@@ -84,6 +91,7 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
     decoder_output = dataset.sos_tensor(batch_size, use_cuda)  # start-of-string
 
     for i in range(sentence_len):  # process one word at a time per batch
+
         decoder_output, decoder_hidden = decoder(decoder_output, decoder_hidden, output)
         batch_loss += loss(decoder_output, target[:, i])
         _, idx = torch.max(decoder_output, 1)
