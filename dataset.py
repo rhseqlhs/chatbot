@@ -68,10 +68,9 @@ class ChatDataset(Dataset):
 
     def sos_tensor(self, size, use_cuda):
         """
-        Return PyTorch Variable representing start-of-string token.
+        Return tensor representing start-of-string token.
         """
-        sos = Variable(torch.LongTensor(size).fill_(self.sos_idx),
-                       requires_grad=False)
+        sos = torch.LongTensor(size).fill_(self.sos_idx)
         if use_cuda:
             sos = sos.cuda()
         return sos

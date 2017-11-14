@@ -88,7 +88,8 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
     elif decoder.rnn_type == 'LSTM':
         decoder_hidden[0].data = hidden.data
 
-    decoder_output = dataset.sos_tensor(batch_size, use_cuda)  # start-of-string
+    # start-of-string
+    decoder_output = Variable(dataset.sos_tensor(batch_size, use_cuda), requires_grad=False)
 
     for i in range(sentence_len):  # process one word at a time per batch
 
@@ -151,7 +152,8 @@ def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
         elif decoder.rnn_type == 'LSTM':
             decoder_hidden[0].data = hidden.data
 
-        decoder_output = dataset.sos_tensor(batch_size, use_cuda)  # start-of-string
+        # start-of-string
+        decoder_output = Variable(dataset.sos_tensor(batch_size, use_cuda), volatile=True)
 
         for i in range(sentence_len):
             decoder_output, decoder_hidden = decoder(decoder_output, decoder_hidden, output)
@@ -198,7 +200,8 @@ def respond(encoder, decoder, input_line, dataset):
     elif decoder.rnn_type == 'LSTM':
         decoder_hidden[0].data = hidden.data
 
-    decoder_output = dataset.sos_tensor(1, False)  # start-of-string
+    # start-of-string
+    decoder_output = Variable(dataset.sos_tensor(1, False), volatile=True)
 
     response = []
     for i in range(dataset.max_len):
