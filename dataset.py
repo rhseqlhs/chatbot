@@ -79,7 +79,7 @@ class ChatDataset(Dataset):
 def collate_fn(data):
     """
     Creates a mini-batch, overriding default_collate function
-    in order to provide variable length data for the encoder.
+    in order to provide batches with input sorted by length.
     """
     # sort such that input line lengths are in decreasing order
     # requirement for using torch.nn.utils.rnn.pack_packed_sequence

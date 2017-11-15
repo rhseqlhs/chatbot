@@ -6,7 +6,6 @@ from sympy import exp, Symbol
 import matplotlib.pyplot as plt
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-from dataset import collate_fn
 from data_utils import process_sentence, sentence_to_index
 
 
@@ -16,6 +15,7 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
     use_cuda = encoder.is_cuda()
     hidden = encoder.init_hidden(batch_size)
     decoder_hidden = decoder.init_hidden(batch_size)
+
     # Create dropout masks
     word_drop_probs = torch.zeros(dataset.nwords).fill_(1 - drop_w)
     if encoder.rnn_type == 'GRU':
@@ -28,20 +28,19 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
     drop_mask = torch.bernoulli(dropout_probs)
     drop_scale = 1 / (1 - drop_t)
 
-    # Container for encoder inputs, outputs
+    # Container for encoder inputs and all top encoder hidden states
     input = Variable(torch.zeros(dataset.nwords), requires_grad=False)
-    output = Variable(torch.zeros(batch_size, dataset.max_len,
-                                  encoder.hidden_size), requires_grad=False)
+    all_hiddens = Variable(torch.zeros(batch_size, dataset.max_len,
+                                       encoder.hidden_size), requires_grad=False)
 
     # Create new instance of DataLoader to simulate sampling with
     # replacement (PyTorch SubsetRandomSampler does not).
     # We are also willing to waste some memory by turning on pin_memory
     batches = DataLoader(dataset, batch_size=batch_size,
                          sampler=sampler, num_workers=0,
-                         collate_fn=collate_fn, pin_memory=True,
-                         drop_last=True)
+                         pin_memory=True, drop_last=True)
     batch = next(iter(batches))  # get one batch from batches
-    lines, target, xlens = batch
+    lines, target, _ = batch
     sentence_len = target.size()[1]
 
     lines = Variable(lines.long(), requires_grad=False)
@@ -49,7 +48,7 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
     if use_cuda:
         lines, target = lines.cuda(), target.cuda()
         word_mask, drop_mask = word_mask.cuda(), drop_mask.cuda()
-        input, output = input.cuda(), output.cuda()
+        input, all_hiddens = input.cuda(), all_hiddens.cuda()
         masked_indexes = masked_indexes.cuda()
 
     # clear hidden state
@@ -58,12 +57,12 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
 
     optimizer.zero_grad()  # clear gradients
 
-    for i in range(xlens[0]):
+    for i in range(sentence_len):
         # word dropout: drop the same word randomly
         masked_indexes = word_mask.index(lines[:, i].data)
         input.data = torch.mul(masked_indexes, lines[:, i].data)
 
-        output[:, i], hidden = encoder(input, hidden)
+        all_hiddens[:, i], hidden = encoder(input, hidden)
         # Varational Dropout (dropout with same mask at each time step)
         if encoder.rnn_type == 'GRU':
             hidden.data = torch.mul(drop_mask, hidden.data) * drop_scale
@@ -93,7 +92,7 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
 
     for i in range(sentence_len):  # process one word at a time per batch
 
-        decoder_output, decoder_hidden = decoder(decoder_output, decoder_hidden, output)
+        decoder_output, decoder_hidden = decoder(decoder_output, decoder_hidden, all_hiddens)
         batch_loss += loss(decoder_output, target[:, i])
         _, idx = torch.max(decoder_output, 1)
 
@@ -136,7 +135,8 @@ def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
         encoder_hidden = repackage_hidden(encoder_hidden)
         decoder_hidden = repackage_hidden(decoder_hidden)
 
-        output, hidden = encoder(lines, encoder_hidden, xlens, dataset.max_len)
+        all_encoder_hiddens, hidden = encoder(lines, encoder_hidden,
+                                              xlens, dataset.max_len)
 
         # Grab final hidden state of encoder
         if encoder.rnn_type == 'GRU':
@@ -156,7 +156,8 @@ def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
         decoder_output = Variable(dataset.sos_tensor(batch_size, use_cuda), volatile=True)
 
         for i in range(sentence_len):
-            decoder_output, decoder_hidden = decoder(decoder_output, decoder_hidden, output)
+            decoder_output, decoder_hidden = decoder(decoder_output, decoder_hidden,
+                                                     all_encoder_hiddens)
             total_loss += loss(decoder_output, target[:, i])
             _, idx = torch.max(decoder_output, 1)
             decoder_output = idx  # feed current prediction as input to decoder
@@ -171,7 +172,7 @@ def respond(encoder, decoder, input_line, dataset):
     # turn off cuda
     encoder.cpu()
     decoder.cpu()
-
+    # batch sizes are always 1
     encoder_hidden = encoder.init_hidden(1)
     decoder_hidden = decoder.init_hidden(1)
 
@@ -184,7 +185,8 @@ def respond(encoder, decoder, input_line, dataset):
     sentence_to_index(line, dataset.vocab, dataset.unk_token, dataset.eos_idx, input_indexes)
     input_line = Variable(input_indexes, volatile=True)
 
-    output, hidden = encoder(input_line.view(1, -1), encoder_hidden, [line_len], dataset.max_len)
+    all_encoder_hiddens, hidden = encoder(input_line.view(1, -1),
+                                          encoder_hidden, [line_len], dataset.max_len)
 
     # Grab final hidden state of encoder
     if encoder.rnn_type == 'GRU':
@@ -205,7 +207,8 @@ def respond(encoder, decoder, input_line, dataset):
 
     response = []
     for i in range(dataset.max_len):
-        decoder_output, decoder_hidden = decoder(decoder_output, decoder_hidden, output)
+        decoder_output, decoder_hidden = decoder(decoder_output, decoder_hidden,
+                                                 all_encoder_hiddens)
         _, idx = torch.max(decoder_output, 1)
         decoder_output = idx  # feed current prediction as input to decoder
         response.append(idx.data[0])
