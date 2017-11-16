@@ -11,6 +11,9 @@ from data_utils import process_sentence, sentence_to_index
 
 def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
           choices, loss, drop_t, drop_w):
+    # turn on train mode to activate dropout between layers
+    encoder.train()
+    decoder.train()
     batch_loss = 0
     use_cuda = encoder.is_cuda()
     hidden = encoder.init_hidden(batch_size)
@@ -118,6 +121,9 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
 
 
 def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
+    # turn off train mode to deactivate dropout between layers
+    encoder.eval()
+    decoder.eval()
     total_loss = 0
     use_cuda = encoder.is_cuda()
     encoder_hidden = encoder.init_hidden(batch_size)
@@ -169,6 +175,8 @@ def respond(encoder, decoder, input_line, dataset):
     """
     Generate chat response to user input, input_line.
     """
+    encoder.eval()
+    decoder.eval()
     # turn off cuda
     encoder.cpu()
     decoder.cpu()

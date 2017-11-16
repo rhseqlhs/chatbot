@@ -9,7 +9,7 @@ class RNN(nn.Module):
     """
 
     def __init__(self, input_size, hidden_size, nlayers, embed_dim,
-                 rnn_type, pad_idx, use_cuda, bidirect):
+                 rnn_type, pad_idx, use_cuda, dropout, bidirect):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -22,7 +22,7 @@ class RNN(nn.Module):
             self.rnn = getattr(nn, rnn_type)(embed_dim,
                                              hidden_size // self.ndirect,
                                              num_layers=nlayers,
-                                             batch_first=True,
+                                             batch_first=True, dropout=dropout,
                                              bidirectional=bidirect)
             if use_cuda:
                 self.rnn.cuda()  # turn on cuda before applying weight_norm
