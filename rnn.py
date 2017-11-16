@@ -1,5 +1,6 @@
 import torch.nn as nn
 from torch.autograd import Variable
+from torch.nn.utils import weight_norm
 
 
 class RNN(nn.Module):
@@ -8,7 +9,7 @@ class RNN(nn.Module):
     """
 
     def __init__(self, input_size, hidden_size, nlayers, embed_dim,
-                 rnn_type, pad_idx, bidirect):
+                 rnn_type, pad_idx, use_cuda, bidirect):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -23,6 +24,8 @@ class RNN(nn.Module):
                                              num_layers=nlayers,
                                              batch_first=True,
                                              bidirectional=bidirect)
+            if use_cuda:
+                self.rnn.cuda()  # turn on cuda before applying weight_norm
         else:
             raise ValueError("Please choose rnn type from: GRU or LSTM")
         self.rnn_type = rnn_type
@@ -54,6 +57,7 @@ class RNN(nn.Module):
         """
         Initialize weights, including internal weights of RNN. From:
         gist.github.com/thomwolf/eea8989cab5ac49919df95f6f1309d80
+        Apply weight normalization to internal weights of RNN.
         """
         ih = (param.data for name, param in self.named_parameters() if 'weight_ih' in name)
         hh = (param.data for name, param in self.named_parameters() if 'weight_hh' in name)
@@ -65,6 +69,10 @@ class RNN(nn.Module):
         for t in b:
             nn.init.constant(t, 0)
         self.embedding.weight.data.uniform_(-0.1, 0.1)
+        # Apply Weight Normalization
+        l = [name for name, _ in list(self.rnn.named_parameters()) if 'weight' in name]
+        for name in l:
+            weight_norm(self.rnn, name)
 
     def is_cuda(self):
         """
