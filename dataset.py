@@ -15,16 +15,15 @@ class ChatDataset(Dataset):
     """
 
     def __init__(self, data_path, max_length, max_vocab_size, min_freq,
-                 sos_token, eos_token, pad_token, unk_token, embed_dim,
-                 special_tokens, threshold, pre_trained=False):
+                 eos_token, pad_token, unk_token, embed_dim, special_tokens,
+                 threshold, pre_trained=False):
         """
         Args:
             data_path (str): path to data file
             max_length (int): maximum length of each sentence, including <eos>
             max_vocab_size (int): maximum number of words allowed in vocabulary
             min_freq (int): minimum frequency to add word to vocabulary
-            sos_token (str): token telling decoder to start response
-            eos_token (str): token telling decoder to stop response
+            eos_token (str): end of sentence token (tells decoder to start or stop)
             pad_token (str): padding token
             unk_token (str): unknown word token
             embed_dim (int): dimension of embedding vectors
@@ -32,7 +31,7 @@ class ChatDataset(Dataset):
             threshold (int): count of unknown words required to prune sentence
             pre_trained (Vector): pre trained word embeddings
         """
-        special_tokens = [pad_token, unk_token, sos_token, eos_token] + special_tokens
+        special_tokens = [pad_token, unk_token, eos_token] + special_tokens
         # the value 0 will be regarded as padding
         assert special_tokens[0] == pad_token
         inputs, targets, counter, xlen = process_data(data_path, max_length,
@@ -45,11 +44,9 @@ class ChatDataset(Dataset):
 
         self.nwords = len(self.vocab)
         self.max_len = max_length
-        self.sos_idx = self.vocab.stoi[sos_token]
         self.eos_idx = self.vocab.stoi[eos_token]
         self.pad_idx = self.vocab.stoi[pad_token]
         self.unk_idx = self.vocab.stoi[unk_token]
-        self.sos_token = sos_token
         self.eos_token = eos_token
         self.pad_token = pad_token
         self.unk_token = unk_token
@@ -74,14 +71,14 @@ class ChatDataset(Dataset):
     def __getitem__(self, idx):
         return self.x_data[idx], self.y_data[idx], self.x_lens[idx]
 
-    def sos_tensor(self, size, use_cuda):
+    def eos_tensor(self, size, use_cuda):
         """
-        Return tensor representing start-of-string token.
+        Return tensor representing end of sentence token.
         """
-        sos = torch.LongTensor(size).fill_(self.sos_idx)
+        eos = torch.LongTensor(size).fill_(self.eos_idx)
         if use_cuda:
-            sos = sos.cuda()
-        return sos
+            eos = eos.cuda()
+        return eos
 
 
 def collate_fn(data):

@@ -79,8 +79,8 @@ def train(encoder, decoder, batch_size, batch, encoder_opt, decoder_opt,
     elif decoder.rnn_type == 'LSTM':
         decoder_hidden[0].data = hidden.data
 
-    # start-of-string
-    decoder_output = Variable(dataset.sos_tensor(batch_size, use_cuda), requires_grad=False)
+    # first input to decoder is the eos token
+    decoder_output = Variable(dataset.eos_tensor(batch_size, use_cuda), requires_grad=False)
 
     for i in range(sentence_len):  # process one word at a time per batch
 
@@ -148,8 +148,7 @@ def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
         elif decoder.rnn_type == 'LSTM':
             decoder_hidden[0].data = hidden.data
 
-        # start-of-string
-        decoder_output = Variable(dataset.sos_tensor(batch_size, use_cuda), volatile=True)
+        decoder_output = Variable(dataset.eos_tensor(batch_size, use_cuda), volatile=True)
 
         for i in range(sentence_len):
             decoder_output, decoder_hidden, _ = decoder(decoder_output, decoder_hidden,
@@ -207,8 +206,7 @@ def respond(encoder, decoder, input_line, dataset, input_len=None):
     elif decoder.rnn_type == 'LSTM':
         decoder_hidden[0].data = hidden.data
 
-    # start-of-string
-    decoder_output = Variable(dataset.sos_tensor(1, False), volatile=True)
+    decoder_output = Variable(dataset.eos_tensor(1, False), volatile=True)
 
     response = []
     for i in range(dataset.max_len):

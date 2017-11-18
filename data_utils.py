@@ -167,8 +167,8 @@ def sentence_to_index(sentence, dataset, output):
 
 def prune_data(data, target, data_lens, dataset, threshold):
     """
-    Remove sentences from data and target if unknown words
-    occur more than threshold.
+    Remove sentences from data and target if unknown words occur
+    more than threshold, or is more than third of input sentence.
     """
     n_iter = target.shape[0]
     prune_list = []
@@ -176,6 +176,8 @@ def prune_data(data, target, data_lens, dataset, threshold):
         data_unk_count = len(np.where(data[i] == dataset.unk_idx)[0])
         target_unk_count = len(np.where(target[i] == dataset.unk_idx)[0])
         if data_unk_count >= threshold or target_unk_count >= threshold:
+            prune_list.append(i)
+        elif data_lens[i] <= data_unk_count * 3:
             prune_list.append(i)
         else:  # update word counts
             dataset.unk_count += (data_unk_count + target_unk_count)
