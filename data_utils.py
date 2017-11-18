@@ -11,6 +11,7 @@ import time
 from tqdm import tnrange
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
+import random
 
 # Helper functions for initializing data
 
@@ -90,17 +91,24 @@ def create_sample(source, dest, data_dir, n_lines):
     print("%s created." % dest)
 
 
-def process_sentence(sentence, counter=None):
+def process_sentence(sentence, max_len, counter=None):
     """
     Lowercase, trim, and remove non-letter characters,
     and catalogue word counts in counter, if provided.
+    Should the number of words exceed max_len, return None.
     """
+    # reduce number of exclamations, etc
+    sentence = re.sub(r"([.!?])", r" \1", sentence)
+    # remove non-letter characters
     new_sentence = re.sub(r"[^a-zA-Z.!?]+", r" ", sentence)
     words = new_sentence.lower().strip().split(' ')
-    for word in words:
-        if counter is not None:
-            counter[word] += 1
-    return words
+    if len(words) > max_len:
+        return None
+    else:
+        for word in words:
+            if counter is not None:
+                counter[word] += 1
+        return words
 
 
 def process_data(data_path, max_len, eos, pad):
@@ -122,41 +130,63 @@ def process_data(data_path, max_len, eos, pad):
 
     for i in tnrange(n_iter, desc='Processing', unit=' lines'):
         input_line = sentences[i * 2][:-1]  # remove '\n' character
-        input_line = process_sentence(input_line, word_count)
+        input_line = process_sentence(input_line, max_len, word_count)
         target_line = sentences[i * 2 + 1][:-1]
-        target_line = process_sentence(target_line, word_count)
+        target_line = process_sentence(target_line, max_len, word_count)
 
-        input_len = len(input_line) + 1  # + 1 for eos token
-        target_len = len(target_line) + 1
-        if input_len <= max_len and target_len <= max_len:
+        if input_line is not None and target_line is not None:
             input_data.append(input_line)
             target_data.append(target_line)
-            input_lens.append(input_len)
+            input_lens.append(len(input_line))
 
     assert len(input_data) == len(target_data)
     return input_data, target_data, word_count, input_lens
 
 
-def convert_to_index(data, vocab, unk_token, eos_idx, result):
+def convert_to_index(data, dataset, result):
     """
-    Convert tokens in data to indexes, with indexing given by vocab.
+    Convert tokens in data to indexes.
     """
     n_lines = len(data)
     with ProcessPoolExecutor() as executer:
         for i in tnrange(n_lines, desc='Converting', unit=' lines'):
-            sentence_to_index(data[i], vocab, unk_token, eos_idx, result[i])
+            sentence_to_index(data[i], dataset, result[i])
 
 
-def sentence_to_index(sentence, vocab, unk_token, eos_idx, output):
+def sentence_to_index(sentence, dataset, output):
     """
     Convert list of words to tensor of indexes.
-    Precondition: len(sentence) < output.shape[0]
     """
-    assert len(sentence) < output.shape[0]
     for i in range(len(sentence)):
         word = sentence[i]
-        idx = vocab.stoi[word]
-        if idx == 0 and word != vocab.itos[0]:
-            idx = vocab.stoi[unk_token]  # unknown word encountered
+        idx = dataset.vocab.stoi[word]
+        if idx == 0 and word != dataset.vocab.itos[0]:
+            # unknown word encountered
+            idx = dataset.unk_idx
         output[i] = idx
-    output[len(sentence)] = eos_idx
+
+def prune_data(data, target, data_lens, dataset, threshold):
+    """
+    Remove sentences from data and target if unknown words
+    occur more than threshold.
+    """
+    n_iter = target.shape[0]
+    prune_list = []
+    for i in tnrange(n_iter, desc='Pruning', unit=' lines'):
+        data_unk_count = len(np.where(data[i] == dataset.unk_idx)[0])
+        target_unk_count = len(np.where(target[i] == dataset.unk_idx)[0])
+        if data_unk_count > threshold or target_unk_count > threshold:
+            prune_list.append(i)
+        else:  # update word counts
+            dataset.unk_count += (data_unk_count + target_unk_count)
+            # 0 is assumed to be padding
+            dataset.total_tokens += (np.count_nonzero(data[i]) + np.count_nonzero(target[i]))
+    # delete sentences in prune list
+    data = np.delete(data, prune_list, 0)
+    target = np.delete(target, prune_list, 0)
+    new_data_lens = []
+    for i in range(len(data_lens)):
+        if i not in prune_list:
+            new_data_lens.append(data_lens[i])
+    assert len(new_data_lens) == data.shape[0]
+    return data, target, new_data_lens

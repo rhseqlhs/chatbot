@@ -1,11 +1,12 @@
 import math
 import random
+import numpy as np
 import torch
 import torchtext.vocab as vocab
 from torch.utils.data import Dataset
 from torch.autograd import Variable
 from torch.utils.data.sampler import SubsetRandomSampler
-from data_utils import process_data, convert_to_index
+from data_utils import process_data, convert_to_index, prune_data
 
 
 class ChatDataset(Dataset):
@@ -15,19 +16,20 @@ class ChatDataset(Dataset):
 
     def __init__(self, data_path, max_length, max_vocab_size, min_freq,
                  sos_token, eos_token, pad_token, unk_token, embed_dim,
-                 special_tokens, pre_trained=False):
+                 special_tokens, threshold, pre_trained=False):
         """
         Args:
             data_path (str): path to data file
             max_length (int): maximum length of each sentence, including <eos>
             max_vocab_size (int): maximum number of words allowed in vocabulary
             min_freq (int): minimum frequency to add word to vocabulary
-            sos_token (str): start-of-string token
-            eos_token (str): end-of-sentence token
+            sos_token (str): token telling decoder to start response
+            eos_token (str): token telling decoder to stop response
             pad_token (str): padding token
             unk_token (str): unknown word token
             embed_dim (int): dimension of embedding vectors
             special_tokens (list of str): other tokens to add to vocabulary
+            threshold (int): count of unknown words required to prune sentence
             pre_trained (Vector): pre trained word embeddings
         """
         special_tokens = [pad_token, unk_token, sos_token, eos_token] + special_tokens
@@ -52,16 +54,22 @@ class ChatDataset(Dataset):
         self.pad_token = pad_token
         self.unk_token = unk_token
         self.embed_dim = embed_dim
+        self.unk_count = 0  # number of unknown words in dataset
+        self.total_tokens = 0  # number of tokens in dataset not counting padding
         self.special_tokens = special_tokens
-        self.x_data = torch.zeros(len(inputs), max_length).int()
-        self.y_data = torch.zeros(len(targets), max_length).int()
         self.x_lens = xlen
+        self.x_data = np.zeros((len(inputs), max_length), dtype=np.int32)
+        self.y_data = np.zeros((len(targets), max_length), dtype=np.int32)
 
-        convert_to_index(inputs, self.vocab, unk_token, self.eos_idx, self.x_data)
-        convert_to_index(targets, self.vocab, unk_token, self.eos_idx, self.y_data)
+        convert_to_index(inputs, self, self.x_data)
+        convert_to_index(targets, self, self.y_data)
+        self.x_data, self.y_data, self.x_lens = prune_data(self.x_data, self.y_data,
+                                                           self.x_lens, self, threshold)
+        self.x_data = torch.from_numpy(self.x_data)
+        self.y_data = torch.from_numpy(self.y_data)
 
     def __len__(self):
-        return self.y_data.size()[0]
+        return len(self.x_lens)
 
     def __getitem__(self, idx):
         return self.x_data[idx], self.y_data[idx], self.x_lens[idx]
@@ -98,7 +106,7 @@ def collate_fn(data):
 def split_data(dataset, train, valid, test):
     """
     Split data to training, validation, and test set by returning
-    samplers used to laod batches from train, valid, and test sets.
+    samplers used to load batches from train, valid, and test sets.
 
     Args:
         dataset (ChatDataset): dataset from which to split
