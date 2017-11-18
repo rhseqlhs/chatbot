@@ -68,7 +68,7 @@ class RNN(nn.Module):
             nn.init.orthogonal(t)
         for t in b:
             nn.init.constant(t, 0)
-        self.embedding.weight.data.uniform_(-0.1, 0.1)
+        self.embedding.weight.data.uniform_(-0.05, 0.05)
         # Apply Weight Normalization
         l = [name for name, _ in list(self.rnn.named_parameters()) if 'weight' in name]
         for name in l:

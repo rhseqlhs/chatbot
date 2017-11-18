@@ -9,12 +9,11 @@ from torch.utils.data import DataLoader
 from data_utils import process_sentence, sentence_to_index
 
 
-def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
-          choices, loss, drop_t, drop_w):
+def train(encoder, decoder, batch_size, batch, encoder_opt, decoder_opt,
+          params, dataset, choices, loss, drop_t, drop_w):
     # turn on train mode to activate dropout between layers
     encoder.train()
     decoder.train()
-    batch_loss = 0
     use_cuda = encoder.is_cuda()
     hidden = encoder.init_hidden(batch_size)
     decoder_hidden = decoder.init_hidden(batch_size)
@@ -36,15 +35,9 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
     all_hiddens = Variable(torch.zeros(batch_size, dataset.max_len,
                                        encoder.hidden_size), requires_grad=False)
 
-    # Create new instance of DataLoader to simulate sampling with
-    # replacement (PyTorch SubsetRandomSampler does not).
-    # We are also willing to waste some memory by turning on pin_memory
-    batches = DataLoader(dataset, batch_size=batch_size,
-                         sampler=sampler, num_workers=0,
-                         pin_memory=True, drop_last=True)
-    batch = next(iter(batches))  # get one batch from batches
     lines, target, _ = batch
     sentence_len = target.size()[1]
+    batch_loss = 0
 
     lines = Variable(lines.long(), requires_grad=False)
     target = Variable(target.long(), requires_grad=False)
@@ -54,11 +47,8 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
         input, all_hiddens = input.cuda(), all_hiddens.cuda()
         masked_indexes = masked_indexes.cuda()
 
-    # clear hidden state
-    hidden = repackage_hidden(hidden)
-    decoder_hidden = repackage_hidden(decoder_hidden)
-
-    optimizer.zero_grad()  # clear gradients
+    encoder_opt.zero_grad()  # clear gradients
+    decoder_opt.zero_grad()
 
     for i in range(sentence_len):
         # word dropout: drop the same word randomly
@@ -112,11 +102,12 @@ def train(encoder, decoder, batch_size, sampler, optimizer, params, dataset,
             decoder_hidden[0].data = torch.mul(drop_mask, decoder_hidden[0].data) * drop_scale
 
     batch_loss.backward()
-    # clip gradients to 0.5 (hyper-parameter!) to reduce exploding gradients
-    torch.nn.utils.clip_grad_norm(params, 0.5)
-    optimizer.step()
+    # clip gradients to 5 (hyper-parameter!) to reduce exploding gradients
+    torch.nn.utils.clip_grad_norm(encoder.parameters(), 5)
+    torch.nn.utils.clip_grad_norm(decoder.parameters(), 5)
+    encoder_opt.step()
+    decoder_opt.step()
 
-    del batches
     return batch_loss.data[0]
 
 
@@ -129,7 +120,6 @@ def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
     encoder_hidden = encoder.init_hidden(batch_size)
     decoder_hidden = decoder.init_hidden(batch_size)
 
-    # Calculate validation loss on entire validation set
     for lines, target, xlens in batches:
         sentence_len = target.size()[1]
         lines = Variable(lines.long(), volatile=True)
@@ -168,7 +158,7 @@ def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
             _, idx = torch.max(decoder_output, 1)
             decoder_output = idx  # feed current prediction as input to decoder
 
-    return total_loss.data[0] / len(batches)
+    return total_loss.data[0]
 
 
 def respond(encoder, decoder, input_line, dataset):
@@ -185,16 +175,17 @@ def respond(encoder, decoder, input_line, dataset):
     decoder_hidden = decoder.init_hidden(1)
 
     # translate input_line to indexes
-    line = process_sentence(input_line)
-    line_len = len(line) + 1  # + 1 for eos token
-    if line_len > dataset.max_len:  # input too long for model
+    line = process_sentence(input_line, dataset.max_len)
+    if line is None:  # input too long for model
         raise UserInputTooLongError
+    else:
+        len_list = [len(line)]
     input_indexes = torch.LongTensor(dataset.max_len).fill_(dataset.pad_idx)
-    sentence_to_index(line, dataset.vocab, dataset.unk_token, dataset.eos_idx, input_indexes)
+    sentence_to_index(line, dataset, input_indexes)
     input_line = Variable(input_indexes, volatile=True)
 
     all_encoder_hiddens, hidden = encoder(input_line.view(1, -1),
-                                          encoder_hidden, [line_len], dataset.max_len)
+                                          encoder_hidden, len_list, dataset.max_len)
 
     # Grab final hidden state of encoder
     if encoder.rnn_type == 'GRU':
