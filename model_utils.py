@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import numpy as np
 from random import random
-from sympy import exp, Symbol
 import matplotlib.pyplot as plt
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
@@ -232,33 +231,6 @@ def repackage_hidden(h):
         return Variable(h.data, requires_grad=False)
     else:
         return tuple(repackage_hidden(v) for v in h)
-
-
-def inverse_sigmoid_decay(x, k):
-    """
-    Symbolic calculation of inverse_sigmoid.
-    The speed of convergence to 0 is given by k.
-    Lower values of k converge faster.
-    Precondition: k >= 1
-    """
-    return k / (k + exp(x / k))
-
-
-def inv_sigm_eval(x_val, k_val):
-    """
-    Evaluation of inverse sigmoid decay.
-
-    Args:
-        x_val (int): value to substitute for Symbol x
-        k_val (int): value to substitute for Symbol k
-
-    """
-    x = Symbol('x')
-    k = Symbol('k')
-    k_val = 1 if k_val < 1 else k_val
-    expr = inverse_sigmoid_decay(x, k)
-    res = expr.subs([(x, x_val), (k, k_val)])
-    return res.evalf()
 
 
 def plot(xvals, yvals, xlabel, ylabel):

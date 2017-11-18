@@ -11,6 +11,5 @@ PyTorch 0.2
 PyTorch Text
 Numpy
 Matplotlib
-Sympy
 tqdm
 ```
