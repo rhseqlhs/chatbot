@@ -84,7 +84,7 @@ def train(encoder, decoder, batch_size, batch, encoder_opt, decoder_opt,
 
     for i in range(sentence_len):  # process one word at a time per batch
 
-        decoder_output, decoder_hidden = decoder(decoder_output, decoder_hidden, all_hiddens)
+        decoder_output, decoder_hidden, _ = decoder(decoder_output, decoder_hidden, all_hiddens)
         batch_loss += loss(decoder_output, target[:, i])
         _, idx = torch.max(decoder_output, 1)
 
@@ -107,7 +107,7 @@ def train(encoder, decoder, batch_size, batch, encoder_opt, decoder_opt,
     encoder_opt.step()
     decoder_opt.step()
 
-    return batch_loss.data[0]
+    return batch_loss.data[0] / batch_size
 
 
 def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
@@ -120,6 +120,7 @@ def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
     decoder_hidden = decoder.init_hidden(batch_size)
 
     for lines, target, xlens in batches:
+        batch_loss = 0
         sentence_len = target.size()[1]
         lines = Variable(lines.long(), volatile=True)
         target = Variable(target.long(), volatile=True)
@@ -151,11 +152,13 @@ def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
         decoder_output = Variable(dataset.sos_tensor(batch_size, use_cuda), volatile=True)
 
         for i in range(sentence_len):
-            decoder_output, decoder_hidden = decoder(decoder_output, decoder_hidden,
-                                                     all_encoder_hiddens)
-            total_loss += loss(decoder_output, target[:, i])
+            decoder_output, decoder_hidden, _ = decoder(decoder_output, decoder_hidden,
+                                                        all_encoder_hiddens)
+            batch_loss += loss(decoder_output, target[:, i])
             _, idx = torch.max(decoder_output, 1)
             decoder_output = idx  # feed current prediction as input to decoder
+        # update total_loss
+        total_loss += (batch_loss / batch_size)
 
     return total_loss.data[0]
 
@@ -209,9 +212,13 @@ def respond(encoder, decoder, input_line, dataset, input_len=None):
 
     response = []
     for i in range(dataset.max_len):
-        decoder_output, decoder_hidden = decoder(decoder_output, decoder_hidden,
-                                                 all_encoder_hiddens)
+        decoder_output, decoder_hidden, max_atten = decoder(decoder_output, decoder_hidden,
+                                                            all_encoder_hiddens)
         _, idx = torch.max(decoder_output, 1)
+        # Unknown word replacement:
+        # replace unknown words with input word with highest attention
+        if idx.data[0] == dataset.unk_idx and max_atten.data[0] <= input_len[0]:
+            idx.data[0] = input_indexes[max_atten.data[0]]
         decoder_output = idx  # feed current prediction as input to decoder
         response.append(idx.data[0])
 

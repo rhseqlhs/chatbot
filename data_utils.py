@@ -175,7 +175,7 @@ def prune_data(data, target, data_lens, dataset, threshold):
     for i in tnrange(n_iter, desc='Pruning', unit=' lines'):
         data_unk_count = len(np.where(data[i] == dataset.unk_idx)[0])
         target_unk_count = len(np.where(target[i] == dataset.unk_idx)[0])
-        if data_unk_count > threshold or target_unk_count > threshold:
+        if data_unk_count >= threshold or target_unk_count >= threshold:
             prune_list.append(i)
         else:  # update word counts
             dataset.unk_count += (data_unk_count + target_unk_count)
