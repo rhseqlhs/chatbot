@@ -160,9 +160,10 @@ def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
     return total_loss.data[0]
 
 
-def respond(encoder, decoder, input_line, dataset):
+def respond(encoder, decoder, input_line, dataset, input_len=None):
     """
     Generate chat response to user input, input_line.
+    If input_len is given, skip sentence to embedding index conversion.
     """
     encoder.eval()
     decoder.eval()
@@ -173,18 +174,21 @@ def respond(encoder, decoder, input_line, dataset):
     encoder_hidden = encoder.init_hidden(1)
     decoder_hidden = decoder.init_hidden(1)
 
-    # translate input_line to indexes
-    line = process_sentence(input_line, dataset.max_len)
-    if line is None:  # input too long for model
-        raise UserInputTooLongError
-    else:
-        len_list = [len(line)]
-    input_indexes = torch.LongTensor(dataset.max_len).fill_(dataset.pad_idx)
-    sentence_to_index(line, dataset, input_indexes)
+    if input_len is None:
+        # translate input_line to indexes
+        line = process_sentence(input_line, dataset.max_len)
+        if line is None:  # input too long for model
+            raise UserInputTooLongError
+        else:
+            input_len = [len(line)]
+        input_indexes = torch.LongTensor(dataset.max_len).fill_(dataset.pad_idx)
+        sentence_to_index(line, dataset, input_indexes)
+    else:  # sentence is already in embedding index form
+        input_indexes = input_line.long()
     input_line = Variable(input_indexes, volatile=True)
 
     all_encoder_hiddens, hidden = encoder(input_line.view(1, -1),
-                                          encoder_hidden, len_list, dataset.max_len)
+                                          encoder_hidden, input_len, dataset.max_len)
 
     # Grab final hidden state of encoder
     if encoder.rnn_type == 'GRU':
@@ -221,6 +225,20 @@ def respond(encoder, decoder, input_line, dataset):
             response_sentence.append(response_word)
 
     return ' '.join(response_sentence)
+
+
+def get_input(input_line, dataset):
+    """
+    Turn line of embedding indexes to human readable words.
+    """
+    sentence = []
+    for i in range(input_line.size()[0]):
+        idx = input_line[i]
+        if idx == dataset.pad_idx:
+            break
+        word = dataset.vocab.itos[idx]
+        sentence.append(word)
+    return ' '.join(sentence)
 
 
 def repackage_hidden(h):
