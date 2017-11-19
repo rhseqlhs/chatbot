@@ -8,106 +8,77 @@ from torch.utils.data import DataLoader
 from data_utils import process_sentence, sentence_to_index
 
 
-def train(encoder, decoder, batch_size, batch, encoder_opt, decoder_opt,
-          params, dataset, choices, loss, drop_t, drop_w):
+def train(encoder, decoder, batch_size, batches, encoder_opt, decoder_opt,
+          params, dataset, choices, loss, drop_w):
     # turn on train mode to activate dropout between layers
     encoder.train()
     decoder.train()
     use_cuda = encoder.is_cuda()
-    hidden = encoder.init_hidden(batch_size)
+    encoder_hidden = encoder.init_hidden(batch_size)
     decoder_hidden = decoder.init_hidden(batch_size)
 
-    # Create dropout masks
-    word_drop_probs = torch.zeros(dataset.nwords).fill_(1 - drop_w)
-    if encoder.rnn_type == 'GRU':
-        dropout_probs = torch.zeros(hidden.size()).fill_(1 - drop_t)
-    else:
-        dropout_probs = torch.zeros(hidden[0].size()).fill_(1 - drop_t)
+    # Create dropout mask
+    #word_drop_probs = torch.zeros(dataset.nwords).fill_(1 - drop_w)
+    #word_mask = torch.bernoulli(word_drop_probs).long()
+    #masked_indexes = torch.zeros(batch_size).long()
 
-    word_mask = torch.bernoulli(word_drop_probs).long()
-    masked_indexes = torch.zeros(batch_size).long()
-    drop_mask = torch.bernoulli(dropout_probs)
-    drop_scale = 1 / (1 - drop_t)
+    # Container for encoder inputs
+    #input = Variable(torch.zeros(dataset.nwords), requires_grad=False)
 
-    # Container for encoder inputs and all top encoder hidden states
-    input = Variable(torch.zeros(dataset.nwords), requires_grad=False)
-    all_hiddens = Variable(torch.zeros(batch_size, dataset.max_len,
-                                       encoder.hidden_size), requires_grad=False)
+    total_loss = 0
+    for lines, target, xlens in batches:
+        sentence_len = target.size()[1]
+        batch_loss = 0
 
-    lines, target, _ = batch
-    sentence_len = target.size()[1]
-    batch_loss = 0
+        lines = Variable(lines.long(), requires_grad=False)
+        target = Variable(target.long(), requires_grad=False)
+        if use_cuda:
+            lines, target = lines.cuda(), target.cuda()
+            #word_mask, masked_indexes = word_mask.cuda(), masked_indexes.cuda()
+            #input = input.cuda()
 
-    lines = Variable(lines.long(), requires_grad=False)
-    target = Variable(target.long(), requires_grad=False)
-    if use_cuda:
-        lines, target = lines.cuda(), target.cuda()
-        word_mask, drop_mask = word_mask.cuda(), drop_mask.cuda()
-        input, all_hiddens = input.cuda(), all_hiddens.cuda()
-        masked_indexes = masked_indexes.cuda()
-
-    encoder_opt.zero_grad()  # clear gradients
-    decoder_opt.zero_grad()
-
-    for i in range(sentence_len):
+        encoder_opt.zero_grad()  # clear gradients
+        decoder_opt.zero_grad()
+        encoder_hidden = repackage_hidden(encoder_hidden)
+        decoder_hidden = repackage_hidden(decoder_hidden)
         # word dropout: drop the same word randomly
-        masked_indexes = word_mask.index(lines[:, i].data)
-        input.data = torch.mul(masked_indexes, lines[:, i].data)
+        #masked_indexes = word_mask.index(lines[:, i].data)
+        #input.data = torch.mul(masked_indexes, lines[:, i].data)
+        all_hiddens, hidden = encoder(lines, encoder_hidden, xlens, dataset.max_len)
 
-        all_hiddens[:, i], hidden = encoder(input, hidden)
-        # Varational Dropout (dropout with same mask at each time step)
-        if encoder.rnn_type == 'GRU':
-            hidden.data = torch.mul(drop_mask, hidden.data) * drop_scale
-        elif encoder.rnn_type == 'LSTM':
-            hidden[0].data = torch.mul(drop_mask, hidden[0].data) * drop_scale
-
-    # reshape drop_mask for use in decoder
-    drop_mask = torch.cat(drop_mask, 1).view(encoder.nlayers, batch_size,
-                                             encoder.hidden_size)
-    # Grab final hidden state of encoder
-    if encoder.rnn_type == 'GRU':
-        hidden.data = torch.cat(hidden, 1).view(encoder.nlayers, batch_size,
-                                                encoder.hidden_size).data
-    elif encoder.rnn_type == 'LSTM':
-        hidden[0].data = torch.cat(hidden[0], 1).view(encoder.nlayers, batch_size,
-                                                      encoder.hidden_size).data
-        hidden = hidden[0]
-
-    # Set to decoder's initial hidden state
-    if decoder.rnn_type == 'GRU':
-        decoder_hidden = hidden
-    elif decoder.rnn_type == 'LSTM':
-        decoder_hidden[0].data = hidden.data
-
-    # first input to decoder is the eos token
-    decoder_output = Variable(dataset.eos_tensor(batch_size, use_cuda), requires_grad=False)
-
-    for i in range(sentence_len):  # process one word at a time per batch
-
-        decoder_output, decoder_hidden, _ = decoder(decoder_output, decoder_hidden, all_hiddens)
-        batch_loss += loss(decoder_output, target[:, i])
-        _, idx = torch.max(decoder_output, 1)
-
-        # batched per token teacher forcing
-        if choices[i] == 1:
-            decoder_output = target[:, i]
-        else:
-            decoder_output = idx  # set current prediction as decoder input
-
-        # Varational Dropout (dropout with same mask at each time step)
+        # Grab final hidden state of encoder
+        bi_hidden_to_uni(hidden)
+        if encoder.rnn_type == 'LSTM':
+            hidden = hidden[0]
+        # Set to decoder's initial hidden state
         if decoder.rnn_type == 'GRU':
-            decoder_hidden.data = torch.mul(drop_mask, decoder_hidden.data) * drop_scale
+            decoder_hidden = hidden
         elif decoder.rnn_type == 'LSTM':
-            decoder_hidden[0].data = torch.mul(drop_mask, decoder_hidden[0].data) * drop_scale
+            decoder_hidden[0].data = hidden.data
 
-    batch_loss.backward()
-    # clip gradients to 5 (hyper-parameter!) to reduce exploding gradients
-    torch.nn.utils.clip_grad_norm(encoder.parameters(), 5)
-    torch.nn.utils.clip_grad_norm(decoder.parameters(), 5)
-    encoder_opt.step()
-    decoder_opt.step()
+        # first input to decoder is the eos token
+        decoder_output = Variable(dataset.eos_tensor(batch_size, use_cuda), requires_grad=False)
 
-    return batch_loss.data[0] / batch_size
+        for i in range(sentence_len):  # process one word at a time per batch
+            decoder_output, decoder_hidden, _ = decoder(decoder_output, decoder_hidden, all_hiddens)
+            batch_loss += loss(decoder_output, target[:, i])
+            _, idx = torch.max(decoder_output, 1)
+
+            # batched per token teacher forcing
+            if choices[i] == 1:
+                decoder_output = target[:, i]
+            else:
+                decoder_output = idx  # set current prediction as decoder input
+
+        batch_loss.backward()
+        # clip gradients to 5 (hyper-parameter!) to reduce exploding gradients
+        torch.nn.utils.clip_grad_norm(encoder.parameters(), 5)
+        torch.nn.utils.clip_grad_norm(decoder.parameters(), 5)
+        encoder_opt.step()
+        decoder_opt.step()
+        total_loss += batch_loss
+
+    return total_loss.data[0] / batch_size
 
 
 def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
@@ -135,12 +106,8 @@ def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
                                               xlens, dataset.max_len)
 
         # Grab final hidden state of encoder
-        if encoder.rnn_type == 'GRU':
-            hidden.data = torch.cat(hidden, 1).view(encoder.nlayers, batch_size,
-                                                    encoder.hidden_size).data
-        elif encoder.rnn_type == 'LSTM':
-            hidden[0].data = torch.cat(hidden[0], 1).view(encoder.nlayers, batch_size,
-                                                          encoder.hidden_size).data
+        bi_hidden_to_uni(hidden)
+        if encoder.rnn_type == 'LSTM':
             hidden = hidden[0]
         # Set to decoder's initial hidden state
         if decoder.rnn_type == 'GRU':
@@ -157,9 +124,9 @@ def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
             _, idx = torch.max(decoder_output, 1)
             decoder_output = idx  # feed current prediction as input to decoder
         # update total_loss
-        total_loss += (batch_loss / batch_size)
+        total_loss += batch_loss
 
-    return total_loss.data[0]
+    return total_loss.data[0] / batch_size
 
 
 def respond(encoder, decoder, input_line, dataset, input_len=None):
@@ -193,14 +160,10 @@ def respond(encoder, decoder, input_line, dataset, input_len=None):
                                           encoder_hidden, input_len, dataset.max_len)
 
     # Grab final hidden state of encoder
-    if encoder.rnn_type == 'GRU':
-        hidden.data = torch.cat(hidden, 1).view(encoder.nlayers, 1,
-                                                encoder.hidden_size).data
-    elif encoder.rnn_type == 'LSTM':
-        hidden[0].data = torch.cat(hidden[0], 1).view(encoder.nlayers, 1,
-                                                      encoder.hidden_size).data
+    bi_hidden_to_uni(hidden)
+    if encoder.rnn_type == 'LSTM':
         hidden = hidden[0]
-    # Set to decoder's initial hidden state
+    # Set to decoder's initial hidden state to final hidden of encoder
     if decoder.rnn_type == 'GRU':
         decoder_hidden = hidden
     elif decoder.rnn_type == 'LSTM':
@@ -230,6 +193,23 @@ def respond(encoder, decoder, input_line, dataset, input_len=None):
             response_sentence.append(response_word)
 
     return ' '.join(response_sentence)
+
+
+def bi_hidden_to_uni(hidden):
+    """
+    Concatenate hidden states of bidirectional RNN
+    to use as hidden state for unidirectional RNN.
+    """
+    hidden_list = []
+    n_iter = hidden.size()[0] // 2
+    if isinstance(hidden, tuple):
+        for i in range(n_iter):
+            hidden_list.append(torch.cat((hidden[0][i * 2], hidden[0][i * 2 + 1]), 1))
+        hidden[0].data = torch.stack(hidden_list, 0).data
+    else:
+        for i in range(n_iter):
+            hidden_list.append(torch.cat((hidden[i * 2], hidden[i * 2 + 1]), 1))
+        hidden.data = torch.stack(hidden_list, 0).data
 
 
 def get_input(input_line, dataset):
