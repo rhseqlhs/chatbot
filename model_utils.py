@@ -9,21 +9,13 @@ from data_utils import process_sentence, sentence_to_index
 
 
 def train(encoder, decoder, batch_size, batches, encoder_opt, decoder_opt,
-          params, dataset, choices, loss, drop_w):
+          params, dataset, choices, loss):
     # turn on train mode to activate dropout between layers
     encoder.train()
     decoder.train()
     use_cuda = encoder.is_cuda()
     encoder_hidden = encoder.init_hidden(batch_size)
     decoder_hidden = decoder.init_hidden(batch_size)
-
-    # Create dropout mask
-    #word_drop_probs = torch.zeros(dataset.nwords).fill_(1 - drop_w)
-    #word_mask = torch.bernoulli(word_drop_probs).long()
-    #masked_indexes = torch.zeros(batch_size).long()
-
-    # Container for encoder inputs
-    #input = Variable(torch.zeros(dataset.nwords), requires_grad=False)
 
     total_loss = 0
     for lines, target, xlens in batches:
@@ -34,16 +26,12 @@ def train(encoder, decoder, batch_size, batches, encoder_opt, decoder_opt,
         target = Variable(target.long(), requires_grad=False)
         if use_cuda:
             lines, target = lines.cuda(), target.cuda()
-            #word_mask, masked_indexes = word_mask.cuda(), masked_indexes.cuda()
-            #input = input.cuda()
 
         encoder_opt.zero_grad()  # clear gradients
         decoder_opt.zero_grad()
         encoder_hidden = encoder.init_hidden(batch_size)
-        decoder_hidden = decoder_hidden.detach()
-        # word dropout: drop the same word randomly
-        #masked_indexes = word_mask.index(lines[:, i].data)
-        #input.data = torch.mul(masked_indexes, lines[:, i].data)
+        decoder_hidden = repackage_hidden(decoder_hidden)
+
         all_hiddens, hidden = encoder(lines, encoder_hidden, xlens, dataset.max_len)
 
         # Grab final hidden state of encoder
@@ -100,7 +88,7 @@ def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
 
         # clear hidden state
         encoder_hidden = encoder.init_hidden(batch_size)
-        decoder_hidden = decoder_hidden.detach()
+        decoder_hidden = repackage_hidden(decoder_hidden)
 
         all_encoder_hiddens, hidden = encoder(lines, encoder_hidden,
                                               xlens, dataset.max_len)
@@ -201,12 +189,13 @@ def bi_hidden_to_uni(hidden):
     to use as hidden state for unidirectional RNN.
     """
     hidden_list = []
-    n_iter = hidden.size()[0] // 2
     if isinstance(hidden, tuple):
+        n_iter = hidden[0].size()[0] // 2
         for i in range(n_iter):
             hidden_list.append(torch.cat((hidden[0][i * 2], hidden[0][i * 2 + 1]), 1))
         hidden[0].data = torch.stack(hidden_list, 0).data
     else:
+        n_iter = hidden.size()[0] // 2
         for i in range(n_iter):
             hidden_list.append(torch.cat((hidden[i * 2], hidden[i * 2 + 1]), 1))
         hidden.data = torch.stack(hidden_list, 0).data
@@ -224,6 +213,16 @@ def get_input(input_line, dataset):
         word = dataset.vocab.itos[idx]
         sentence.append(word)
     return ' '.join(sentence)
+
+
+def repackage_hidden(h):
+    """
+    Clear history of hidden state of rnn.
+    """
+    if type(h) == Variable:
+        return Variable(h.data, requires_grad=False)
+    else:
+        return tuple(repackage_hidden(v) for v in h)
 
 
 def plot(xvals, yvals, xlabel, ylabel):

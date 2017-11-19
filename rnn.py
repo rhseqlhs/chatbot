@@ -73,6 +73,7 @@ class RNN(nn.Module):
         l = [name for name, _ in list(self.rnn.named_parameters()) if 'weight' in name]
         for name in l:
             weight_norm(self.rnn, name)
+        weight_norm(self.embedding)
 
     def is_cuda(self):
         """
