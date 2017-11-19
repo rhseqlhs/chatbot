@@ -39,8 +39,8 @@ def train(encoder, decoder, batch_size, batches, encoder_opt, decoder_opt,
 
         encoder_opt.zero_grad()  # clear gradients
         decoder_opt.zero_grad()
-        encoder_hidden = repackage_hidden(encoder_hidden)
-        decoder_hidden = repackage_hidden(decoder_hidden)
+        encoder_hidden = encoder.init_hidden(batch_size)
+        decoder_hidden = decoder_hidden.detach()
         # word dropout: drop the same word randomly
         #masked_indexes = word_mask.index(lines[:, i].data)
         #input.data = torch.mul(masked_indexes, lines[:, i].data)
@@ -99,8 +99,8 @@ def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
             lines, target = lines.cuda(), target.cuda()
 
         # clear hidden state
-        encoder_hidden = repackage_hidden(encoder_hidden)
-        decoder_hidden = repackage_hidden(decoder_hidden)
+        encoder_hidden = encoder.init_hidden(batch_size)
+        decoder_hidden = decoder_hidden.detach()
 
         all_encoder_hiddens, hidden = encoder(lines, encoder_hidden,
                                               xlens, dataset.max_len)
@@ -224,16 +224,6 @@ def get_input(input_line, dataset):
         word = dataset.vocab.itos[idx]
         sentence.append(word)
     return ' '.join(sentence)
-
-
-def repackage_hidden(h):
-    """
-    Clear history of hidden state of rnn.
-    """
-    if type(h) == Variable:
-        return Variable(h.data, requires_grad=False)
-    else:
-        return tuple(repackage_hidden(v) for v in h)
 
 
 def plot(xvals, yvals, xlabel, ylabel):
