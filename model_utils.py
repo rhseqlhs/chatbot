@@ -29,7 +29,7 @@ def train(encoder, decoder, batch_size, batches, encoder_opt, decoder_opt,
 
         encoder_opt.zero_grad()  # clear gradients
         decoder_opt.zero_grad()
-        encoder_hidden = encoder.init_hidden(batch_size)
+        encoder_hidden = repackage_hidden(encoder_hidden)
         decoder_hidden = repackage_hidden(decoder_hidden)
 
         all_hiddens, hidden = encoder(lines, encoder_hidden, xlens, dataset.max_len)
@@ -87,7 +87,7 @@ def evaluate(encoder, decoder, batch_size, batches, dataset, loss):
             lines, target = lines.cuda(), target.cuda()
 
         # clear hidden state
-        encoder_hidden = encoder.init_hidden(batch_size)
+        encoder_hidden = repackage_hidden(encoder_hidden)
         decoder_hidden = repackage_hidden(decoder_hidden)
 
         all_encoder_hiddens, hidden = encoder(lines, encoder_hidden,
