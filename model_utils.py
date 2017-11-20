@@ -9,7 +9,7 @@ from data_utils import process_sentence, sentence_to_index
 
 
 def train(encoder, decoder, batch_size, batches, encoder_opt, decoder_opt,
-          params, dataset, choices, loss):
+          dataset, choices, loss):
     # turn on train mode to activate dropout between layers
     encoder.train()
     decoder.train()
