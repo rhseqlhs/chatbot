@@ -80,3 +80,31 @@ class RNN(nn.Module):
         """
         param_type = str(type(next(self.parameters()).data))
         return 'cuda' in param_type
+
+
+class DecoderRNN(RNN):
+    """
+    Basic Decoder without attentional mechanism
+    """
+
+    def __init__(self, input_size, hidden_size, nlayers, embed_dim,
+                 rnn_type, pad_idx, use_cuda, dropout, bidirect=False):
+        super().__init__(input_size, hidden_size, nlayers, embed_dim,
+                         rnn_type, pad_idx, use_cuda, dropout, False)  # unidirectional
+        self.relu = nn.LeakyReLU()
+        self.linear = nn.Linear(hidden_size, input_size)
+        self.softmax = nn.LogSoftmax()
+        self.init_weights()
+
+    def init_weights(self):
+        super().init_weights()
+        self.linear.weight.data.uniform_(-0.05, 0.05)
+
+    def forward(self, input, hidden, lengths=None):
+        batch_size = input.size()[0]
+        embedded = self.embedding(input).unsqueeze(1)
+        output = self.relu(embedded)
+        output, hidden = self.rnn(output, hidden)
+        output = self.linear(output[:, 0, :])
+        output = self.softmax(output)
+        return output, hidden
