@@ -91,7 +91,6 @@ class DecoderRNN(RNN):
                  rnn_type, pad_idx, use_cuda, dropout, bidirect=False):
         super().__init__(input_size, hidden_size, nlayers, embed_dim,
                          rnn_type, pad_idx, use_cuda, dropout, False)  # unidirectional
-        self.relu = nn.LeakyReLU()
         self.linear = nn.Linear(hidden_size, input_size)
         self.softmax = nn.LogSoftmax()
         self.init_weights()
@@ -100,11 +99,10 @@ class DecoderRNN(RNN):
         super().init_weights()
         self.linear.weight.data.uniform_(-0.05, 0.05)
 
-    def forward(self, input, hidden, lengths=None):
+    def forward(self, input, hidden):
         batch_size = input.size()[0]
         embedded = self.embedding(input).unsqueeze(1)
-        output = self.relu(embedded)
-        output, hidden = self.rnn(output, hidden)
+        output, hidden = self.rnn(embedded, hidden)
         output = self.linear(output[:, 0, :])
         output = self.softmax(output)
         return output, hidden
