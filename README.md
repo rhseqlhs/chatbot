@@ -8,7 +8,7 @@ The Jupyter Notebook chatbot.ipynb goes through the data downloading, generation
 The implementation include best practices from Neural Machine Translation such as input and output embedding weight tying, unknown token replacement, and a bidirectional encoder.
 
 ## Variational Autoencoder for Sentence Generation
-The second part of chatbot.ipynb is a Variational Autoencoder (VAE) for unsupervised sentence generation. The encoder and decoder for the VAE are RNNs, following Bowman et al. Generating Sentences from a Continous Space. We also include word dropout in the decoder, and KL Divergence Annealing as in the aforementioned paper. The Variational Autoencoder is implemented with the Pyro Deep Probabilistic Programming Language, and follows the VAE implementation provided in the tutorial for Pyro very closely.
+The second part of chatbot.ipynb is a Variational Autoencoder (VAE) for unsupervised sentence generation. The encoder and decoder for the VAE are RNNs, following Bowman et al. Generating Sentences from a Continuous Space. We also include word dropout in the decoder, and KL Divergence Annealing as in the aforementioned paper. The Variational Autoencoder is implemented with the Pyro Deep Probabilistic Programming Language, and follows the VAE implementation provided in the tutorial for Pyro very closely.
 
 ## Requirements
 ```

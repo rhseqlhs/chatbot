@@ -238,3 +238,18 @@ class UserInputTooLongError(Exception):
     encoder and decoder are trained to handle.
     """
     pass
+
+
+def one_hot_conversion(batch, input_size, use_cuda):
+    """
+    Convert tensor, batch, to a one hot encoding tensor with length input_size.
+
+    Dimensions:
+        batch: batch size * sequence length
+        result: batch size * sequence length * input_size
+    """
+    result = torch.ByteTensor(batch.size()[0], batch.size()[1], input_size).zero_()
+    if use_cuda:
+        result = result.cuda()
+    result.scatter_(2, batch.unsqueeze(2), 1)
+    return result
